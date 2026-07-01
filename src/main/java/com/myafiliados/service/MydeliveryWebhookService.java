@@ -2,6 +2,7 @@ package com.myafiliados.service;
 
 import com.myafiliados.dto.Dtos;
 import com.myafiliados.model.Afiliado;
+import com.myafiliados.model.AfiliadoEventoLog;
 import com.myafiliados.model.AfiliadoVinculo;
 import com.myafiliados.repository.AfiliadoRepository;
 import com.myafiliados.repository.AfiliadoVinculoRepository;
@@ -13,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Recebe e processa eventos enviados pelo mydelivery-api via webhook.
@@ -30,11 +33,21 @@ public class MydeliveryWebhookService {
 
     private final AfiliadoRepository afiliadoRepo;
     private final AfiliadoVinculoRepository vinculoRepo;
+    private final EventoLogService eventoLog;
+    private final AutoComissaoService autoComissaoService;
 
     @Transactional
     public boolean processar(Dtos.WebhookEventoRequest e) {
-        if (e == null || e.tipo == null || e.restauranteId == null) {
+        if (e == null || e.tipo == null) {
             log.warn("[Webhook] payload inválido");
+            return false;
+        }
+        // AUTOINDICACAO_BLOQUEADA vem SEM restauranteId (o cadastro nem chegou a ser criado)
+        if ("AUTOINDICACAO_BLOQUEADA".equals(e.tipo)) {
+            return tratarAutoindicacao(e);
+        }
+        if (e.restauranteId == null) {
+            log.warn("[Webhook] restauranteId ausente pra {} — ignorando", e.tipo);
             return false;
         }
         switch (e.tipo) {
@@ -46,6 +59,25 @@ public class MydeliveryWebhookService {
                 log.info("[Webhook] tipo desconhecido: {}", e.tipo);
                 return true; // ack mesmo assim
         }
+    }
+
+    private boolean tratarAutoindicacao(Dtos.WebhookEventoRequest e) {
+        Afiliado a = e.codigoAfiliado != null
+                ? afiliadoRepo.findByCodigo(e.codigoAfiliado).orElse(null)
+                : null;
+        Map<String, Object> det = new LinkedHashMap<>();
+        det.put("emailTentativa", e.emailTentativa);
+        det.put("telefoneTentativa", e.telefoneTentativa);
+        if (e.flags != null) det.putAll(e.flags);
+        eventoLog.registrar(AfiliadoEventoLog.Tipo.AUTOINDICACAO_BLOQUEADA,
+                eventoLog.novo()
+                        .afiliado(a != null ? a.getId() : null)
+                        .codigoAfiliado(e.codigoAfiliado)
+                        .descricao("Bloqueado no cadastro: " + (e.descricao != null ? e.descricao : "sem detalhes"))
+                        .detalhes(det));
+        log.warn("[Webhook] AUTOINDICACAO_BLOQUEADA codigo={} descricao={}",
+                e.codigoAfiliado, e.descricao);
+        return true;
     }
 
     private boolean tratarCriado(Dtos.WebhookEventoRequest e) {
@@ -73,6 +105,13 @@ public class MydeliveryWebhookService {
             catch (Exception ignored) {}
         }
         vinculoRepo.save(v);
+        eventoLog.registrar(AfiliadoEventoLog.Tipo.CADASTRO_CONCLUIDO,
+                eventoLog.novo()
+                        .afiliado(a.getId())
+                        .vinculo(v.getId())
+                        .restaurante(e.restauranteId)
+                        .codigoAfiliado(e.codigoAfiliado)
+                        .descricao("Restaurante '" + safe(e.restauranteNome) + "' criou conta"));
         log.info("[Webhook] RESTAURANTE_CRIADO vinculo={} afiliado={} restaurante={}",
                 v.getId(), a.getId(), e.restauranteId);
         return true;
@@ -104,6 +143,30 @@ public class MydeliveryWebhookService {
         }
         atualizarSnapshot(v, e);
         vinculoRepo.save(v);
+        eventoLog.registrar(AfiliadoEventoLog.Tipo.ASSINATURA_REALIZADA,
+                eventoLog.novo()
+                        .afiliado(v.getAfiliadoId())
+                        .vinculo(v.getId())
+                        .restaurante(e.restauranteId)
+                        .descricao("Assinou plano " + v.getPlanoContratado()
+                                + " · valor R$ " + v.getValorPlano()));
+        // Comissão IMEDIATA — nasce disponível pra pagamento manual do admin.
+        // Se restaurante cancelar/estornar depois, admin cancela a comissão.
+        try {
+            var comissao = autoComissaoService.gerarComissaoAssinatura(v);
+            if (comissao != null) {
+                eventoLog.registrar(AfiliadoEventoLog.Tipo.COMISSAO_GERADA,
+                        eventoLog.novo()
+                                .afiliado(v.getAfiliadoId())
+                                .vinculo(v.getId())
+                                .restaurante(e.restauranteId)
+                                .comissao(comissao.getId())
+                                .descricao("Comissão gerada automaticamente após assinatura · R$ "
+                                        + comissao.getValor()));
+            }
+        } catch (Exception ex) {
+            log.warn("[Webhook] falha ao gerar comissão auto: {}", ex.getMessage());
+        }
         log.info("[Webhook] ASSINOU vinculo={} plano={} valor={} mensal_eq={}",
                 v.getId(), v.getPlanoContratado(), v.getValorPlano(), v.getValorMensalEquivalente());
         return true;
@@ -115,6 +178,12 @@ public class MydeliveryWebhookService {
         v.setStatusVinculo(AfiliadoVinculo.StatusVinculo.CANCELADO);
         v.setCanceladoEm(LocalDateTime.now());
         vinculoRepo.save(v);
+        eventoLog.registrar(AfiliadoEventoLog.Tipo.ASSINATURA_CANCELADA,
+                eventoLog.novo()
+                        .afiliado(v.getAfiliadoId())
+                        .vinculo(v.getId())
+                        .restaurante(e.restauranteId)
+                        .descricao("Restaurante cancelou plano"));
         log.info("[Webhook] CANCELOU vinculo={}", v.getId());
         return true;
     }
@@ -125,9 +194,17 @@ public class MydeliveryWebhookService {
         if (v.getStatusVinculo() == AfiliadoVinculo.StatusVinculo.TRIAL) {
             v.setStatusVinculo(AfiliadoVinculo.StatusVinculo.TRIAL_EXPIRADO);
             vinculoRepo.save(v);
+            eventoLog.registrar(AfiliadoEventoLog.Tipo.TRIAL_EXPIROU,
+                    eventoLog.novo()
+                            .afiliado(v.getAfiliadoId())
+                            .vinculo(v.getId())
+                            .restaurante(e.restauranteId)
+                            .descricao("Trial expirou sem converter em assinatura"));
         }
         return true;
     }
+
+    private static String safe(String s) { return s == null ? "" : s; }
 
     private void atualizarSnapshot(AfiliadoVinculo v, Dtos.WebhookEventoRequest e) {
         if (e.restauranteNome != null)  v.setRestauranteNome(e.restauranteNome);

@@ -92,7 +92,7 @@ public class Dtos {
 
     /** Webhook inbound vindo do mydelivery-api. */
     @Data public static class WebhookEventoRequest {
-        public String tipo; // RESTAURANTE_CRIADO / ASSINOU / CANCELOU / TRIAL_EXPIROU
+        public String tipo; // RESTAURANTE_CRIADO / ASSINOU / CANCELOU / TRIAL_EXPIROU / AUTOINDICACAO_BLOQUEADA
         public String codigoAfiliado; // ex "ab12cd34"
         public Long restauranteId;
         public String restauranteNome;
@@ -102,6 +102,11 @@ public class Dtos {
         public String planoContratado;
         public BigDecimal valorPlano;
         public BigDecimal valorMensalEquivalente;
+        // ── Anti-autoindicação (só usado em AUTOINDICACAO_BLOQUEADA) ──
+        public String emailTentativa;
+        public String telefoneTentativa;
+        public String descricao;
+        public java.util.Map<String, Object> flags;
     }
 
     /** Admin aprova afiliado pendente. */

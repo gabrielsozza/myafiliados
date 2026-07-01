@@ -90,8 +90,13 @@ public class AdminInternalController {
         out.put("codigo", a.getCodigo());
         out.put("nome", a.getNome());
         out.put("email", a.getEmail());
+        out.put("telefone", a.getTelefone());
+        out.put("cpf", a.getCpf());
         out.put("comissaoPercentual", a.getComissaoPercentual());
         out.put("status", a.getStatus() == null ? null : a.getStatus().name());
+        // Chave PIX pra comparação anti-autoindicação. Só o valor bruto
+        // (não retorna tipo ou banco pra reduzir superfície de dados sensíveis).
+        out.put("chavePix", a.getRecChavePix());
         return ResponseEntity.ok(out);
     }
 }
