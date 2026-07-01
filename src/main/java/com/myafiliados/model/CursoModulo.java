@@ -43,9 +43,24 @@ public class CursoModulo {
     @Column(nullable = false)
     private Boolean ativo = true;
 
-    /** Duração em segundos (informativo, opcional). */
+    /** Duração em segundos — coluna mantida por compat, não exibida na UI. */
     @Column(name = "duracao_segundos")
     private Integer duracaoSegundos;
+
+    /**
+     * ID do módulo/grupo ({@link CursoGrupo}) a que essa aula pertence.
+     * Null = aula solta ("Sem categoria" no painel).
+     */
+    @Column(name = "grupo_id")
+    private Long grupoId;
+
+    /**
+     * Anexos da aula em JSON — array de objetos {"nome":"...","url":"...","tipo":"..."}.
+     * Ex: PDFs de resumo, planilhas, links pra material extra.
+     * Guardo como JSON pra evitar tabela extra por poucos anexos por aula.
+     */
+    @Column(name = "anexos_json", columnDefinition = "TEXT")
+    private String anexosJson;
 
     @CreationTimestamp
     @Column(name = "criado_em", updatable = false)

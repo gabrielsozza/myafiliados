@@ -132,6 +132,15 @@ public class Dtos {
         public Integer ordem;
         public Boolean ativo;
         public Integer duracaoSegundos;
+        public Long grupoId;
+        public String anexosJson;
+    }
+
+    @Data public static class CursoGrupoRequest {
+        public String titulo;
+        public String descricao;
+        public Integer ordem;
+        public Boolean ativo;
     }
     @Data public static class MaterialApoioRequest {
         public String titulo;

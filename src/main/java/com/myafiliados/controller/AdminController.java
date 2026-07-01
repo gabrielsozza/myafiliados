@@ -29,6 +29,7 @@ public class AdminController {
     private final AfiliadoVinculoRepository vinculoRepo;
     private final AfiliadoComissaoRepository comissaoRepo;
     private final CursoModuloRepository cursoRepo;
+    private final CursoGrupoRepository grupoRepo;
     private final MaterialApoioRepository materialRepo;
     private final AfiliadoService afiliadoService;
     private final ComissaoService comissaoService;
@@ -177,11 +178,74 @@ public class AdminController {
     private CursoModulo aplicar(CursoModulo m, Dtos.CursoModuloRequest r) {
         if (r.titulo != null) m.setTitulo(r.titulo);
         if (r.descricao != null) m.setDescricao(r.descricao);
-        if (r.videoUrl != null) m.setVideoUrl(r.videoUrl);
+        if (r.videoUrl != null) m.setVideoUrl(normalizarVideoUrl(r.videoUrl));
         if (r.ordem != null) m.setOrdem(r.ordem);
         if (r.ativo != null) m.setAtivo(r.ativo);
         if (r.duracaoSegundos != null) m.setDuracaoSegundos(r.duracaoSegundos);
+        // grupoId: aceita explicit null pra "desagrupar"
+        m.setGrupoId(r.grupoId);
+        if (r.anexosJson != null) m.setAnexosJson(r.anexosJson.isBlank() ? null : r.anexosJson);
         return m;
+    }
+
+    /**
+     * Normaliza URL do YouTube pra formato de embed. Aceita:
+     *  - youtube.com/watch?v=ID
+     *  - youtu.be/ID
+     *  - youtube.com/embed/ID (já normalizado)
+     *  - youtube.com/shorts/ID
+     * Qualquer outra URL (Cloudinary, Vimeo, arquivo mp4) passa direto.
+     */
+    private String normalizarVideoUrl(String url) {
+        if (url == null) return null;
+        String u = url.trim();
+        if (u.isEmpty()) return u;
+        // watch?v=
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?:youtube\\.com/watch\\?v=|youtu\\.be/|youtube\\.com/shorts/)([A-Za-z0-9_-]{6,})")
+                .matcher(u);
+        if (m.find()) {
+            return "https://www.youtube.com/embed/" + m.group(1);
+        }
+        return u;
+    }
+
+    // ───────────────────────── GRUPOS DE CURSO ─────────────────────────
+
+    @GetMapping("/curso-grupos")
+    public ResponseEntity<List<CursoGrupo>> listarGrupos() {
+        return ResponseEntity.ok(grupoRepo.findAllByOrderByOrdemAscIdAsc());
+    }
+
+    @PostMapping("/curso-grupos")
+    public ResponseEntity<CursoGrupo> criarGrupo(@RequestBody Dtos.CursoGrupoRequest req) {
+        return ResponseEntity.ok(grupoRepo.save(aplicarGrupo(new CursoGrupo(), req)));
+    }
+
+    @PutMapping("/curso-grupos/{id}")
+    public ResponseEntity<CursoGrupo> editarGrupo(@PathVariable Long id,
+                                                    @RequestBody Dtos.CursoGrupoRequest req) {
+        CursoGrupo g = grupoRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        return ResponseEntity.ok(grupoRepo.save(aplicarGrupo(g, req)));
+    }
+
+    @DeleteMapping("/curso-grupos/{id}")
+    public ResponseEntity<Void> apagarGrupo(@PathVariable Long id) {
+        // Aulas do grupo NÃO são apagadas — só perdem o vínculo (grupoId=null).
+        cursoRepo.findAll().stream()
+                .filter(c -> id.equals(c.getGrupoId()))
+                .forEach(c -> { c.setGrupoId(null); cursoRepo.save(c); });
+        grupoRepo.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    private CursoGrupo aplicarGrupo(CursoGrupo g, Dtos.CursoGrupoRequest r) {
+        if (r.titulo != null) g.setTitulo(r.titulo);
+        if (r.descricao != null) g.setDescricao(r.descricao);
+        if (r.ordem != null) g.setOrdem(r.ordem);
+        if (r.ativo != null) g.setAtivo(r.ativo);
+        return g;
     }
 
     // ───────────────────────── MATERIAIS ─────────────────────────
