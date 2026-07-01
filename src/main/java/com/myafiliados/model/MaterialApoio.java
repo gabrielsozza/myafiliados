@@ -57,5 +57,13 @@ public class MaterialApoio {
     @Column(name = "atualizado_em")
     private LocalDateTime atualizadoEm;
 
-    public enum Tipo { PDF, IMAGEM, VIDEO, OUTRO }
+    /**
+     * Tipos de material.
+     *  - PDF/IMAGEM/VIDEO/OUTRO: material genérico (upload direto pro Cloudinary)
+     *  - CARDAPIO_EXEMPLO: link pro cardápio público de um restaurante real MyDelivery
+     *    (ex: Maçaí, Monkeys). Admin cadastra URL do cardápio, afiliado copia e mostra
+     *    ao dono de restaurante prospect.
+     *  - LINK_EXTERNO: URL genérica (site institucional, planilha, doc), sem upload.
+     */
+    public enum Tipo { PDF, IMAGEM, VIDEO, OUTRO, CARDAPIO_EXEMPLO, LINK_EXTERNO }
 }
