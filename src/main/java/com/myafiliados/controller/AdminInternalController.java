@@ -1,0 +1,58 @@
+package com.myafiliados.controller;
+
+import com.myafiliados.security.JwtUtil;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.Map;
+
+/**
+ * Endpoints server-to-server chamados pelo admin-mydelivery-api.
+ *
+ * Segurança: header X-Admin-Secret deve bater com a mesma chave usada
+ * no webhook (mydelivery.afiliados.webhook-secret) — evita criar mais
+ * uma variável de ambiente separada só pra isso.
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/admin-internal")
+@RequiredArgsConstructor
+public class AdminInternalController {
+
+    private final JwtUtil jwtUtil;
+
+    @Value("${mydelivery.afiliados.webhook-secret:}")
+    private String adminSecret;
+
+    @Value("${mydelivery.afiliados.admin-email:gpsozza3@gmail.com}")
+    private String adminEmail;
+
+    /**
+     * SSO — gera um JWT admin válido pra ser embutido em URL do frontend.
+     * Usado pelo admin-mydelivery-api pra abrir o painel afiliados já logado.
+     */
+    @PostMapping("/sso-token")
+    public ResponseEntity<Map<String, Object>> ssoToken(
+            @RequestHeader(value = "X-Admin-Secret", required = false) String secret) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            log.warn("[Admin-Internal] secret vazia — rejeitando SSO");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        if (!adminSecret.equals(secret)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        String token = jwtUtil.gerar("admin:" + adminEmail, "ADMIN_AFILIADOS");
+        return ResponseEntity.ok(Map.of(
+                "token", token,
+                "role", "ADMIN_AFILIADOS",
+                "email", adminEmail));
+    }
+}

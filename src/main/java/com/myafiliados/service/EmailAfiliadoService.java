@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
@@ -26,7 +27,13 @@ public class EmailAfiliadoService {
     @Value("${mydelivery.afiliados.painel-url:https://afiliados.mydeliveryfood.com.br}")
     private String painelUrl;
 
-    public void enviarCadastroRecebido(Afiliado a) throws Exception {
+    /**
+     * ASYNC — não bloqueia o cadastro do afiliado. Se o SMTP travar ou
+     * a config estiver errada, o log registra mas o request principal
+     * já retornou 200 ao cliente.
+     */
+    @Async
+    public void enviarCadastroRecebido(Afiliado a) {
         String html = baseHtml("Recebemos seu cadastro!",
             "Olá <b>" + escape(a.getNome()) + "</b>,<br><br>" +
             "Recebemos sua solicitação para participar do programa de afiliados do <b>MyDelivery</b>." +
@@ -36,7 +43,8 @@ public class EmailAfiliadoService {
         enviar(a.getEmail(), "MyDelivery Afiliados — Cadastro recebido", html);
     }
 
-    public void enviarAprovacao(Afiliado a) throws Exception {
+    @Async
+    public void enviarAprovacao(Afiliado a) {
         String html = baseHtml("Seu cadastro foi aprovado!",
             "Olá <b>" + escape(a.getNome()) + "</b>,<br><br>" +
             "Boas notícias! Seu cadastro no programa de afiliados <b>MyDelivery</b> foi aprovado. " +
@@ -47,15 +55,19 @@ public class EmailAfiliadoService {
         enviar(a.getEmail(), "MyDelivery Afiliados — Bem-vindo!", html);
     }
 
-    private void enviar(String para, String assunto, String htmlBody) throws Exception {
-        MimeMessage msg = mailSender.createMimeMessage();
-        MimeMessageHelper h = new MimeMessageHelper(msg, true, "UTF-8");
-        h.setFrom(remetente, "MyDelivery Afiliados");
-        h.setTo(para);
-        h.setSubject(assunto);
-        h.setText(htmlBody, true);
-        mailSender.send(msg);
-        log.info("[Email] enviado pra {} | assunto: {}", para, assunto);
+    private void enviar(String para, String assunto, String htmlBody) {
+        try {
+            MimeMessage msg = mailSender.createMimeMessage();
+            MimeMessageHelper h = new MimeMessageHelper(msg, true, "UTF-8");
+            h.setFrom(remetente, "MyDelivery Afiliados");
+            h.setTo(para);
+            h.setSubject(assunto);
+            h.setText(htmlBody, true);
+            mailSender.send(msg);
+            log.info("[Email] enviado pra {} | assunto: {}", para, assunto);
+        } catch (Exception e) {
+            log.warn("[Email] falha ao enviar pra {}: {}", para, e.getMessage());
+        }
     }
 
     private String baseHtml(String titulo, String corpoHtml, String btnTexto, String btnUrl) {

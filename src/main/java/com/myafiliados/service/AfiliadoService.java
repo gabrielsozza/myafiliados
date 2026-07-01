@@ -47,9 +47,8 @@ public class AfiliadoService {
         a.setStatus(Afiliado.Status.PENDENTE);
         a.setComissaoPercentual(percentualPadrao);
         Afiliado salvo = repo.save(a);
-        // Email de "recebemos seu cadastro" (best-effort)
-        try { emailService.enviarCadastroRecebido(salvo); }
-        catch (Exception e) { log.warn("[Afiliado] falha email cadastro: {}", e.getMessage()); }
+        // Email async — jamais bloqueia o cadastro. Se SMTP travar/falhar, só loga.
+        emailService.enviarCadastroRecebido(salvo);
         return salvo;
     }
 
@@ -94,8 +93,7 @@ public class AfiliadoService {
         a.setAprovadoEm(LocalDateTime.now());
         a.setAprovadoPor(adminEmail);
         Afiliado salvo = repo.save(a);
-        try { emailService.enviarAprovacao(salvo); }
-        catch (Exception e) { log.warn("[Afiliado] falha email aprovação: {}", e.getMessage()); }
+        emailService.enviarAprovacao(salvo);
         return salvo;
     }
 
