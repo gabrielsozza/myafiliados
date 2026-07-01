@@ -55,9 +55,11 @@ public class AfiliadoController {
         String base = checkoutBaseUrl.replaceAll("/$", "");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("codigo", a.getCodigo());
-        out.put("mensal", base + "/cadastro.html?afiliado=" + a.getCodigo() + "&plano=mensal");
-        out.put("semestral", base + "/cadastro.html?afiliado=" + a.getCodigo() + "&plano=semestral");
-        out.put("anual", base + "/cadastro.html?afiliado=" + a.getCodigo() + "&plano=anual");
+        // URL correta: login.html com hash #cadastro (a landing captura ?afiliado=
+        // e ?plano= no localStorage já no primeiro load — ver login.html)
+        out.put("mensal", base + "/login.html?afiliado=" + a.getCodigo() + "&plano=mensal#cadastro");
+        out.put("semestral", base + "/login.html?afiliado=" + a.getCodigo() + "&plano=semestral#cadastro");
+        out.put("anual", base + "/login.html?afiliado=" + a.getCodigo() + "&plano=anual#cadastro");
         out.put("generico", base + "/?afiliado=" + a.getCodigo());
         return ResponseEntity.ok(out);
     }
