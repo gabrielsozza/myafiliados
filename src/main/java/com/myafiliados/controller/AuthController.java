@@ -24,13 +24,29 @@ public class AuthController {
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<Dtos.AfiliadoResponse> signup(@RequestBody Dtos.SignupRequest req) {
-        Afiliado a = service.signup(req);
-        return ResponseEntity.ok(Dtos.AfiliadoResponse.de(a));
+    public ResponseEntity<?> signup(@RequestBody Dtos.SignupRequest req) {
+        try {
+            Afiliado a = service.signup(req);
+            return ResponseEntity.ok(Dtos.AfiliadoResponse.de(a));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            // Retorna JSON com msg legível pro frontend em vez de 403 mudo
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("erro", e.getReason() != null ? e.getReason() : "Erro no cadastro"));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", e.getMessage() != null ? e.getMessage() : "Erro interno"));
+        }
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Dtos.LoginResponse> login(@RequestBody Dtos.LoginRequest req) {
-        return ResponseEntity.ok(authService.login(req));
+    public ResponseEntity<?> login(@RequestBody Dtos.LoginRequest req) {
+        try {
+            return ResponseEntity.ok(authService.login(req));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("erro", e.getReason() != null ? e.getReason() : "Erro no login"));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("erro", "Erro interno"));
+        }
     }
 }
