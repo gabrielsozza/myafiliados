@@ -49,12 +49,20 @@ public class DemoProxyController {
     @GetMapping("/abrir-sistema")
     @PreAuthorize("hasRole('AFILIADO')")
     public ResponseEntity<Map<String, Object>> abrirSistema(@AuthenticationPrincipal String emailAfiliado) {
+        // Diagnóstico direto: se o proxy nem tá configurado, dizemos O QUE falta.
+        // Sem essa mensagem clara, o admin fica adivinhando por que 503 aparece.
         if (secret == null || secret.isBlank()) {
             log.error("DEMO_PROXY: AFILIADOS_DEMO_SECRET não configurado no myafiliados-api");
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(Map.of("erro", "Demo indisponível — configuração pendente"));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "erro", "Demo não configurado — falta setar AFILIADOS_DEMO_SECRET no Railway (myafiliados-api)."));
+        }
+        if (mydeliveryApiUrl == null || mydeliveryApiUrl.isBlank()) {
+            log.error("DEMO_PROXY: MYDELIVERY_API_URL não configurado no myafiliados-api");
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "erro", "Demo não configurado — falta setar MYDELIVERY_API_URL no Railway (myafiliados-api)."));
         }
 
+        String urlDestino = mydeliveryApiUrl.replaceAll("/$", "") + "/api/afiliado/demo/token";
         try {
             RestClient http = RestClient.builder()
                     .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
@@ -63,8 +71,10 @@ public class DemoProxyController {
                     }})
                     .build();
 
-            String urlDestino = mydeliveryApiUrl.replaceAll("/$", "") + "/api/afiliado/demo/token";
-            Map<String, Object> resposta = http.post()
+            // Usa toEntity pra pegar body em qualquer status (2xx OU erro) e propagar
+            // a mensagem específica do mydelivery-api (secret errado, restaurante
+            // demo não existe, etc). Sem isso, qualquer 4xx/5xx vira genérico.
+            org.springframework.http.ResponseEntity<Map> ent = http.post()
                     .uri(urlDestino)
                     .header("X-Afiliados-Secret", secret)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -73,21 +83,34 @@ public class DemoProxyController {
                             "afiliadoId", emailAfiliado == null ? "" : emailAfiliado
                     ))
                     .retrieve()
-                    .body(Map.class);
+                    .onStatus(status -> true, (req, res) -> { /* nao lanca — deixa a gente ler o body */ })
+                    .toEntity(Map.class);
 
-            if (resposta == null || resposta.get("url") == null) {
-                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                        .body(Map.of("erro", "Demo indisponível no momento"));
+            Map<String, Object> resposta = ent.getBody();
+
+            if (ent.getStatusCode().is2xxSuccessful() && resposta != null && resposta.get("url") != null) {
+                log.info("DEMO_PROXY: sessão demo aberta pra afiliado='{}'", emailAfiliado);
+                return ResponseEntity.ok(Map.of(
+                        "url", resposta.get("url"),
+                        "expiraEmMinutos", resposta.getOrDefault("expiraEmMinutos", 30)
+                ));
             }
-            log.info("DEMO_PROXY: sessão demo aberta pra afiliado='{}'", emailAfiliado);
-            return ResponseEntity.ok(Map.of(
-                    "url", resposta.get("url"),
-                    "expiraEmMinutos", resposta.getOrDefault("expiraEmMinutos", 30)
+
+            // Extrai mensagem específica se veio (ex: "restaurante demo não configurado")
+            String erroBackend = resposta != null && resposta.get("erro") != null
+                    ? String.valueOf(resposta.get("erro"))
+                    : "resposta sem detalhe (HTTP " + ent.getStatusCode().value() + ")";
+            log.warn("DEMO_PROXY: mydelivery-api rejeitou — status={}, erro='{}'", ent.getStatusCode().value(), erroBackend);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "erro", "Demo indisponível: " + erroBackend
             ));
         } catch (Exception e) {
-            log.warn("DEMO_PROXY: falha ao chamar mydelivery-api pra abrir demo — {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(Map.of("erro", "Demo indisponível no momento — tente daqui a pouco"));
+            // Falha de rede/timeout/URL inválida — separada pra distinguir de erro de negócio
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            log.warn("DEMO_PROXY: falha ao chamar mydelivery-api em {} — {}", urlDestino, msg);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "erro", "Demo indisponível: não consegui falar com o mydelivery-api (" + msg + ")"
+            ));
         }
     }
 }
